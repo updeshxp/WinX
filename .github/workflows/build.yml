@@ -7,7 +7,7 @@ on:
     branches: [ "winlator_bionic" ]
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build:
@@ -17,7 +17,8 @@ jobs:
     - name: Checkout repository
       uses: actions/checkout@v4
       with:
-          submodules: recursive
+        submodules: recursive
+        fetch-depth: 0
 
     - name: Set up JDK 17
       uses: actions/setup-java@v4
@@ -29,11 +30,52 @@ jobs:
     - name: Grant execute permission for gradlew
       run: chmod +x gradlew
 
-    - name: Build with Gradle
-      run: ./gradlew assembleDebug
+    - name: Get build information
+      id: build_info
+      shell: bash
+      run: |
+        SHORT_SHA=$(git rev-parse --short HEAD)
+        FULL_SHA=$(git rev-parse HEAD)
+        BRANCH="${GITHUB_REF_NAME}"
+
+        echo "short_sha=$SHORT_SHA" >> "$GITHUB_OUTPUT"
+        echo "full_sha=$FULL_SHA" >> "$GITHUB_OUTPUT"
+        echo "branch=$BRANCH" >> "$GITHUB_OUTPUT"
+
+        echo "Short SHA: $SHORT_SHA"
+        echo "Full SHA: $FULL_SHA"
+        echo "Branch: $BRANCH"
+
+    - name: Build Release APK
+      run: ./gradlew assembleRelease
 
     - name: Upload APK as artifact
       uses: actions/upload-artifact@v4
       with:
-        name: app-debug
-        path: app/build/outputs/apk/debug/app-debug.apk
+        name: winlator-bionic-release-${{ steps.build_info.outputs.short_sha }}
+        path: app/build/outputs/apk/release/app-release.apk
+        if-no-files-found: error
+
+    - name: Create GitHub Release
+      if: github.event_name == 'push'
+      uses: softprops/action-gh-release@v2
+      with:
+        tag_name: winlator-bionic-${{ steps.build_info.outputs.short_sha }}
+        name: Winlator Bionic - ${{ steps.build_info.outputs.short_sha }}
+        body: |
+          ## Winlator Bionic Release
+
+          **Branch:** `${{ steps.build_info.outputs.branch }}`
+          **Commit:** `${{ steps.build_info.outputs.full_sha }}`
+          **Short Commit:** `${{ steps.build_info.outputs.short_sha }}`
+          **Build:** `Release`
+          **Workflow Run:** `${{ github.run_id }}`
+
+          ### Source
+          This build was generated from commit:
+          `${{ steps.build_info.outputs.full_sha }}`
+
+        files: |
+          app/build/outputs/apk/release/app-release.apk
+        draft: false
+        prerelease: false
