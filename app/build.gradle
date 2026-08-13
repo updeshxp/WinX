@@ -157,7 +157,18 @@ android {
         debug {
             minifyEnabled false
         }
-        // If you have a release build type, add it here
+        release {
+            minifyEnabled false
+        }
+    }
+
+    aaptOptions {
+        cruncherEnabled = false
+    }
+
+    lint {
+        checkReleaseBuilds false
+        abortOnError false
     }
 
     ndkVersion '29.0.14206865'
@@ -173,6 +184,12 @@ android {
         jniLibs {
             useLegacyPackaging = true
         }
+    }
+}
+
+tasks.whenTaskAdded { task ->
+    if (task.name.contains("ArtProfile")) {
+        task.enabled = false
     }
 }
 
