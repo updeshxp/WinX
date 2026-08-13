@@ -49,12 +49,49 @@ jobs:
     - name: Build Release APK
       run: ./gradlew assembleRelease
 
-    - name: Upload APK as artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: winlator-bionic-release-${{ steps.build_info.outputs.short_sha }}
-        path: app/build/outputs/apk/release/app-release.apk
-        if-no-files-found: error
+    - name: Decode signing keystore
+      if: github.event_name == 'push'
+      env:
+        KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+      run: |
+        echo "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/winlator-release.jks"
+
+    - name: Sign Release APK
+      if: github.event_name == 'push'
+      env:
+        KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+        KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+      run: |
+        UNSIGNED_APK=$(find app/build/outputs -type f -name "*unsigned.apk" | head -n 1)
+
+        if [ -z "$UNSIGNED_APK" ]; then
+          echo "::error::Unsigned APK not found"
+          exit 1
+        fi
+
+        echo "Signing: $UNSIGNED_APK"
+
+        "$ANDROID_HOME/build-tools/35.0.0/apksigner" sign \
+          --ks "$RUNNER_TEMP/winlator-release.jks" \
+          --ks-key-alias "$KEY_ALIAS" \
+          --ks-pass "pass:$KEYSTORE_PASSWORD" \
+          --key-pass "pass:$KEY_PASSWORD" \
+          --out "$RUNNER_TEMP/winlator-bionic.apk" \
+          "$UNSIGNED_APK"
+
+    - name: Verify APK signature
+      if: github.event_name == 'push'
+      run: |
+        "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify \
+          --verbose \
+          "$RUNNER_TEMP/winlator-bionic.apk"
+
+    - name: Prepare APK
+      if: github.event_name == 'push'
+      run: |
+        cp "$RUNNER_TEMP/winlator-bionic.apk" \
+          "Winlator-Bionic-${{ steps.build_info.outputs.short_sha }}.apk"
 
     - name: Create GitHub Release
       if: github.event_name == 'push'
@@ -63,19 +100,15 @@ jobs:
         tag_name: winlator-bionic-${{ steps.build_info.outputs.short_sha }}
         name: Winlator Bionic - ${{ steps.build_info.outputs.short_sha }}
         body: |
-          ## Winlator Bionic Release
+          ## Winlator Bionic Custom Release
 
           **Branch:** `${{ steps.build_info.outputs.branch }}`
           **Commit:** `${{ steps.build_info.outputs.full_sha }}`
           **Short Commit:** `${{ steps.build_info.outputs.short_sha }}`
           **Build:** `Release`
+          **Signed:** `Yes`
           **Workflow Run:** `${{ github.run_id }}`
 
-          ### Source
-          This build was generated from commit:
-          `${{ steps.build_info.outputs.full_sha }}`
-
-        files: |
-          app/build/outputs/apk/release/app-release.apk
+        files: Winlator-Bionic-${{ steps.build_info.outputs.short_sha }}.apk
         draft: false
         prerelease: false
