@@ -17,6 +17,8 @@ public abstract class HttpUtils {
     private static void downloadAsync(String url, Callback<String> onDownloadComplete) {
         try {
             HttpURLConnection connection = (HttpURLConnection)(new URL(url)).openConnection();
+            // api.github.com rejects requests with no User-Agent (403).
+            connection.setRequestProperty("User-Agent", "WinX");
             if (connection.getResponseCode() != HttpURLConnection.HTTP_OK) {
                 onDownloadComplete.call(null);
                 return;

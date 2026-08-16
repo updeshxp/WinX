@@ -36,7 +36,7 @@
     <string-array name="wrapper_graphics_driver_version_entries">
         <item>System</item>
         <item>v819</item>
-        <item>turnip25.1.0</item>
+        <item>turnip-mainline-V31</item>
     </string-array>
     <string-array name="audio_driver_entries">
         <item>ALSA</item>
@@ -53,15 +53,16 @@
     </string-array>
     <string-array name="ddrawrapper_entries">
         <item>CnC-DDraw</item>
+        <item>D7VK</item>
         <item>Dd7To9</item>
+        <item>Dgvoodoo</item>
         <item>None</item>
     </string-array>
     <string-array name="dxvk_version_entries">
         <item>1.11.1-sarek</item>
         <item>1.10.3-arm64ec-async</item>
-        <item>1.10.3</item>
-        <item>2.3.1</item>
         <item>2.3.1-arm64ec-gplasync</item>
+        <item>3.1.1-binsem-arm64ec-gplasync</item>
     </string-array>
     <string-array name="dxvk_max_device_memory_entries">
         <item>0 (Default)</item>
@@ -140,13 +141,13 @@
         <item>Native (Windows)</item>
     </string-array>
     <string-array name="box64_version_entries">
-        <item>0.3.7</item>
+        <item>0.4.4</item>
     </string-array>
     <string-array name="wowbox64_version_entries">
-        <item>0.3.7</item>
+        <item>0.4.4</item>
     </string-array>
     <string-array name="fexcore_version_entries">
-        <item>2508</item>
+        <item>2608</item>
     </string-array>
     <string-array name="dinput_mapper_type_entries">
         <item>@string/dinput_legacy</item>
@@ -169,6 +170,7 @@
         <item>None</item>
         <item>2.8</item>
         <item>2.14.1</item>
+        <item>proton-arm64ec-3.0.1</item>
     </string-array>
     <string-array name="some_lc_all">
         <item>ar_EG</item>
@@ -325,7 +327,6 @@
         <item>Box64</item>
     </string-array>
     <string-array name="wine_entries">
-        <item>proton-9.0-x86_64</item>
         <item>proton-9.0-arm64ec</item>
     </string-array>
     <string-array name="vkbasalt_sharpness_entries">

@@ -75,6 +75,7 @@ public enum Binding {
     }
 
     public static Binding fromString(String name) {
+        if (name == null) return Binding.NONE;
         switch (name) {
             case "KEY_INSERT":
                 return Binding.KEY_INSERT;

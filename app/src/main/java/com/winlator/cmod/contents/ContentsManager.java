@@ -24,7 +24,7 @@ import java.util.Map;
 
 public class ContentsManager {
     public static final String PROFILE_NAME = "profile.json";
-    public static final String REMOTE_PROFILES = "https://gitlab.com/winlator3/winlator-extra/-/raw/main/contents.json";
+    public static final String REMOTE_PROFILES = "https://raw.githubusercontent.com/updeshxp/Winlator-Contents/refs/heads/main/contents.json";
     public static final String[] DXVK_TRUST_FILES = {"${system32}/d3d8.dll", "${system32}/d3d9.dll", "${system32}/d3d10.dll", "${system32}/d3d10_1.dll",
             "${system32}/d3d10core.dll", "${system32}/d3d11.dll", "${system32}/dxgi.dll", "${syswow64}/d3d8.dll", "${syswow64}/d3d9.dll", "${syswow64}/d3d10.dll",
             "${syswow64}/d3d10_1.dll", "${syswow64}/d3d10core.dll", "${syswow64}/d3d11.dll", "${syswow64}/dxgi.dll"};
@@ -234,6 +234,8 @@ public class ContentsManager {
 
         if (!getTmpDir(context).renameTo(installPath)) {
             callback.onFailed(InstallFailedReason.ERROR_UNKNOWN, null);
+            return; // was missing: without it a failed rename still reported onSucceed (install "succeeded"
+                    // but the files never landed -> "downloaded but not usable")
         }
 
         callback.onSucceed(profile);

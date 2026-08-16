@@ -111,7 +111,7 @@ public class InputControlsFragment extends Fragment {
         manager = new InputControlsManager(getContext());
 
         preferences = PreferenceManager.getDefaultSharedPreferences(getContext());
-        isDarkMode = preferences.getBoolean("dark_mode", false);
+        isDarkMode = preferences.getBoolean("dark_mode", true);
     }
 
     @Override
