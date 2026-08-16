@@ -87,7 +87,7 @@ public class MainActivity extends AppCompatActivity implements NavigationView.On
 
         // Load the user's preferred theme
         sharedPreferences = PreferenceManager.getDefaultSharedPreferences(this);
-        isDarkMode = sharedPreferences.getBoolean("dark_mode", false);
+        isDarkMode = sharedPreferences.getBoolean("dark_mode", true);
 
         // Apply the theme based on the preference
         if (isDarkMode) {
@@ -130,7 +130,7 @@ public class MainActivity extends AppCompatActivity implements NavigationView.On
             navigationView.setCheckedItem(R.id.main_menu_input_controls);
         } else {
             int selectedMenuItemId = intent.getIntExtra("selected_menu_item_id", 0);
-            int menuItemId = selectedMenuItemId > 0 ? selectedMenuItemId : R.id.main_menu_containers;
+            int menuItemId = selectedMenuItemId > 0 ? selectedMenuItemId : R.id.main_menu_shortcuts;
 
             actionBar.setHomeAsUpIndicator(R.drawable.icon_action_bar_menu);
             onNavigationItemSelected(navigationView.getMenu().findItem(menuItemId));
@@ -263,9 +263,7 @@ public class MainActivity extends AppCompatActivity implements NavigationView.On
             ((TextView) dialog.findViewById(R.id.TVAppVersion)).setText(getString(R.string.version) + " " + pInfo.versionName);
 
             String creditsAndThirdPartyAppsHTML = String.join("<br />",
-                    "Winlator Cmod by coffincolors, me (<a href=\"https://github.com/coffincolors/winlator\">Fork</a>, <a href=\"https://github.com/Pipetto-crypto/winlator\">Fork</a>)",
-                    "Big Picture Mode Music by",
-                    "Dale Melvin Blevens III (Fumer)",
+                    "WinX by updeshxp, me (<a href=\"https://github.com/updeshxp/WinX\">Fork</a>, <a href=\"https://github.com/Pipetto-crypto/winlator\">Fork</a>)",
                     "---",
                     "Termux Package(<a href=\"https://github.com/termux/termux-packages\">github.com/termux/termux-package</a>)",
                     "Wine (<a href=\"https://www.winehq.org\">winehq.org</a>)",

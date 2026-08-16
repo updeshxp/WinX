@@ -77,7 +77,7 @@ import java.util.concurrent.Executors;
 
 public class SettingsFragment extends Fragment {
     public static final String DEFAULT_WINE_DEBUG_CHANNELS = "warn,err,fixme";
-    public static final String DEFAULT_WINLATOR_PATH = Environment.getExternalStorageDirectory().getPath() + "/Winlator";
+    public static final String DEFAULT_WINLATOR_PATH = Environment.getExternalStorageDirectory().getPath() + "/WinX";
     public static final String DEFAULT_SHORTCUT_EXPORT_PATH = DEFAULT_WINLATOR_PATH + "/Shortcuts";
     private Callback<Uri> installSoundFontCallback;
     private PreloaderDialog preloaderDialog;
@@ -126,13 +126,13 @@ public class SettingsFragment extends Fragment {
         preferences = PreferenceManager.getDefaultSharedPreferences(context);
 
         // Check for Dark Mode preference
-        isDarkMode = preferences.getBoolean("dark_mode", false);
+        isDarkMode = preferences.getBoolean("dark_mode", true);
         // Apply dynamic styles
         applyDynamicStyles(view, isDarkMode);
 
         // Initialize the Dark Mode checkbox
         cbDarkMode = view.findViewById(R.id.CBDarkMode);
-        cbDarkMode.setChecked(preferences.getBoolean("dark_mode", false));
+        cbDarkMode.setChecked(preferences.getBoolean("dark_mode", true));
 
         cbDarkMode.setOnCheckedChangeListener((buttonView, isChecked) -> {
             // Save dark mode preference

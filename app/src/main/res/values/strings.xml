@@ -4,7 +4,7 @@
     <!ENTITY TERMUX_X11_APP_NAME "Winlator:X11">
     ]>
 <resources>
-    <string name="app_name">Winlator</string>
+    <string name="app_name">WinX</string>
     <string name="run">Run</string>
     <string name="edit">Edit</string>
     <string name="remove">Remove</string>
@@ -176,6 +176,10 @@
     <string name="compatibility">Compatibility</string>
     <string name="intermediate">Intermediate</string>
     <string name="performance">Performance</string>
+    <string name="extreme">Extreme</string>
+    <string name="unity">Unity</string>
+    <string name="unity_mono_bleeding_edge">Unity Mono Bleeding Edge</string>
+    <string name="denuvo">Denuvo</string>
     <string name="preset">Preset</string>
     <string name="you_cannot_remove_this_preset">You cannot remove this preset</string>
     <string name="dxwrapper_help_content"><![CDATA[
@@ -348,7 +352,7 @@
     <string name="reinstall_imagefs">Reinstall Imagefs</string>
     <string name="do_you_want_to_reinstall_imagefs">Do you want to reinstall imagefs? This operation will restore system files, your containers won\'t be changed.</string>
     <string name="unable_to_remove_content_since_container_using">Unable to remove this content, because a container is currently using this Wine.</string>
-    <string name="get_more_contents_form_github">You can access https://github.com/longjunyu2/winlator/releases to get more contents.</string>
+    <string name="get_more_contents_form_github">You can access https://github.com/updeshxp/WinX/releases to get more contents.</string>
     <string name="setup_failed">Setup failed</string>
     <string name="graphics_driver_configuration">Graphics Driver Configuration</string>
     <string name="select_graphics_driver_version">Select Graphics Driver Version:</string>
