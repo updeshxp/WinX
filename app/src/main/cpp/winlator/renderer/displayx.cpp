@@ -237,18 +237,14 @@ void DisplayX::networkThreadLoop() {
                             for (uint32_t j = 0; j < imageCount; j++) {
                                 auto drawable = std::make_unique<Drawable>();
                                 drawable->id = -1;
-                                drawable->textureId = -1;
                                 drawable->width = window->width;
                                 drawable->height = window->height;
                                 drawable->data = nullptr;
-                                drawable->isDirty = false;
-                                drawable->format = AHARDWAREBUFFER_FORMAT_R8G8B8A8_UNORM;
-                                drawable->sizeChanged = false;
-                                
                                 AHardwareBuffer_recvHandleFromUnixSocket(events[i].data.fd, &drawable->ahb);
                                 AHardwareBuffer_Desc outDesc{};
                                 AHardwareBuffer_describe(drawable->ahb, &outDesc);
                                 drawable->stride = outDesc.stride;
+                                drawable->format = outDesc.format;
                                 drawable->isDirectContent = false;
                                 drawable->isDisplayX = true;
                                 drawable->drawableObj = nullptr;
@@ -609,11 +605,11 @@ void DisplayX::queueEvent(std::function<void()> func) {
     eventLock.notify();
 }
 
-void DisplayX::requestWindowUpdate(Drawable *drawable, Window *window) {
+void DisplayX::requestWindowUpdate(Window *window) {
     auto lock = presentLock.lock();
     
     auto presentRequest = std::make_unique<PresentRequest>();
-    presentRequest->drawable = drawable;
+    presentRequest->drawable = window->hasDirectContents() ? window->currentDirectContent : window->drawable.get();
     presentRequest->sync_fence = -1;
     presentRequest->presentId = -1;
     presentRequest->clientFd = -1;
@@ -685,10 +681,8 @@ void DisplayX::changeGeometry(Window *window, bool resized) {
     
     int ret;
     
-    if (resized) {
-        window->drawable->sizeChanged = false;
+    if (resized)
         pfnASurfaceTransactionSetBuffer(windowTransaction, window->control, nullptr, -1);
-    }
     
     if (pfnASurfaceTransactionSetPosition) {
         pfnASurfaceTransactionSetPosition(windowTransaction, window->control, window->x, window->y);
@@ -736,14 +730,8 @@ void DisplayX::changeZOrder(Window *window, Window *sibling, int stackMode) {
     pfnASurfaceTransactionApply(windowTransaction);
 }
 
-void DisplayX::updateCursor(Window *window) {
-    int ret;
-    
-    auto cursor = window->cursor;
-    if (!cursor) return;
-   
-    pfnASurfaceTransactionSetBuffer(cursorTransaction, cursorManager->control, cursor->image->ahb, -1);
-    pfnASurfaceTransactionSetVisibility(cursorTransaction, cursorManager->control, (cursor->visible && cursorVisible) ?  ASURFACE_TRANSACTION_VISIBILITY_SHOW : ASURFACE_TRANSACTION_VISIBILITY_HIDE);
+void DisplayX::updateCursor(Cursor *cursor) {
+    pfnASurfaceTransactionSetBuffer(cursorTransaction, cursorManager->control, cursor && (cursor->visible && cursorVisible) ? cursor->image->ahb : nullptr, -1);
     pfnASurfaceTransactionApply(cursorTransaction);
 }
 
@@ -796,16 +784,14 @@ void DisplayX::createRootCursorControl() {
     cursorTransaction = pfnASurfaceTransactionCreate();
 }
 
-void DisplayX::drawRootCursor() {
-    createRootCursorControl();
-    
-    if (!cursorVisible) return;
+void DisplayX::showCursor() {
+    if (!cursorManager->control) createRootCursorControl();
     
     auto rootCursor = cursorManager->getRootCursor();
-    if (!cursorManager) return;
+    if (!rootCursor) return;
     
     pfnASurfaceTransactionSetBuffer(cursorTransaction, cursorManager->control, rootCursor->image->ahb, -1);
-    pfnASurfaceTransactionSetVisibility(cursorTransaction, cursorManager->control, ASURFACE_TRANSACTION_VISIBILITY_SHOW);
+    pfnASurfaceTransactionSetVisibility(cursorTransaction, cursorManager->control, cursorVisible ? ASURFACE_TRANSACTION_VISIBILITY_SHOW : ASURFACE_TRANSACTION_VISIBILITY_HIDE);
     pfnASurfaceTransactionSetZOrder(cursorTransaction, cursorManager->control, INT32_MAX);
     pfnASurfaceTransactionApply(cursorTransaction);
 }

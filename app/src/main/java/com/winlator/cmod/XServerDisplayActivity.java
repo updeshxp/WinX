@@ -1524,7 +1524,7 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
         }
 
         envVars.put("VK_ICD_FILENAMES", imageFs.getShareDir() + "/vulkan/icd.d/wrapper_icd.aarch64.json");
-        envVars.put("GALLIUM_DRIVER", "zink");
+        envVars.put("MESA_LOADER_DRIVER_OVERRIDE", "zink");
 
         if (firstTimeBoot) {
             Log.d("XServerDisplayActivity", "First time container boot, re-extracting libs");

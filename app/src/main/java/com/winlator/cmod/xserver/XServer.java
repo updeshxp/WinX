@@ -10,10 +10,12 @@ import com.winlator.cmod.winhandler.WinHandler;
 import com.winlator.cmod.xserver.extensions.BigReqExtension;
 import com.winlator.cmod.xserver.extensions.DRI3Extension;
 import com.winlator.cmod.xserver.extensions.Extension;
+import com.winlator.cmod.xserver.extensions.GLXExtension;
 import com.winlator.cmod.xserver.extensions.MITSHMExtension;
 import com.winlator.cmod.xserver.extensions.PresentExtension;
 import com.winlator.cmod.xserver.extensions.SyncExtension;
 
+import com.winlator.cmod.xserver.extensions.XComposite;
 import java.nio.charset.Charset;
 import java.util.EnumMap;
 import java.util.concurrent.locks.ReentrantLock;
@@ -235,6 +237,8 @@ public class XServer {
         extensions.put(DRI3Extension.MAJOR_OPCODE, new DRI3Extension(this));
         extensions.put(PresentExtension.MAJOR_OPCODE, new PresentExtension(this));
         extensions.put(SyncExtension.MAJOR_OPCODE, new SyncExtension(this));
+        extensions.put(GLXExtension.MAJOR_OPCODE, new GLXExtension(this));
+        extensions.put(XComposite.MAJOR_OPCODE, new XComposite(this));
     }
 
     public <T extends Extension> T getExtension(int opcode) {
