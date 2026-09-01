@@ -1,4 +1,5 @@
 #include "egl.hpp"
+#include "effect_composer.hpp"
 #include "displayx.hpp"
 
 #define STB_IMAGE_IMPLEMENTATION
@@ -9,6 +10,7 @@ JNIXServer xserver;
 WindowManager windowManager;
 CursorManager cursorManager;
 EGLRenderer renderer;
+EffectComposer effectComposer;
 DisplayX displayX;
 
 extern "C" jint JNI_OnLoad(JavaVM* vm, void*) {
@@ -44,7 +46,7 @@ Java_com_winlator_cmod_widget_XServerView_nativeInit(JNIEnv *env, jobject thiz, 
     auto drawable = std::make_unique<struct Drawable>();
     jobject drawableObj = env->CallObjectMethod(rootWindowObj, cache.windowGetContent);
     drawable->id = env->GetIntField(drawableObj, cache.drawableID);
-    drawable->texture = nullptr;
+    drawable->glTexture = nullptr;
     drawable->width = env->GetShortField(drawableObj, cache.drawableWidth);
     drawable->height = env->GetShortField(drawableObj, cache.drawableHeight);
     drawable->ahb = (AHardwareBuffer *)env->GetLongField(drawableObj, cache.drawableAHB);
@@ -92,7 +94,7 @@ Java_com_winlator_cmod_widget_XServerView_nativeInit(JNIEnv *env, jobject thiz, 
     
     auto cursorDrawable = std::make_unique<struct Drawable>();
     cursorDrawable->id = -1;
-    cursorDrawable->texture = nullptr;
+    cursorDrawable->glTexture = nullptr;
     cursorDrawable->isDirectContent = false;
     cursorDrawable->format = AHARDWAREBUFFER_FORMAT_R8G8B8A8_UNORM;
     cursorDrawable->width = w;
@@ -153,6 +155,10 @@ Java_com_winlator_cmod_widget_XServerView_nativeInit(JNIEnv *env, jobject thiz, 
     env->DeleteLocalRef(windowManagerObj);
     env->DeleteLocalRef(inputDeviceManagerObj);
     
+    effectComposer.init();
+    if (xserver.isDisplayX() && windowManager.getRootWindow()->drawable->format == AHARDWAREBUFFER_FORMAT_R8G8B8A8_UNORM)
+        effectComposer.setColorSwapEnabled(true);
+    
     renderer.windowManager = &windowManager;
     renderer.cursorManager = &cursorManager;
     renderer.cache = &cache;
@@ -162,9 +168,12 @@ Java_com_winlator_cmod_widget_XServerView_nativeInit(JNIEnv *env, jobject thiz, 
     displayX.cursorManager = &cursorManager;
     displayX.cache = &cache;
     displayX.xServer = &xserver;
+    displayX.effectComposer = &effectComposer;
     
     displayX.setPerformanceMode(env->GetBooleanField(context, cache.performanceMode));
     displayX.setPresentRR(env->GetBooleanField(context, cache.presentRR));
+    displayX.setBackPressure(env->GetBooleanField(context, cache.backPressure));
+    displayX.setPrecisePresentation(env->GetBooleanField(context, cache.precisePresentation));
     
     if (xserver.isDisplayX())
         displayX.start();
@@ -191,7 +200,7 @@ Java_com_winlator_cmod_widget_XServerView_nativeCreateWindow(JNIEnv *env, jobjec
         auto drawable = std::make_unique<struct Drawable>();
         jobject drawableObj = env->CallObjectMethod(windowObj, cache.windowGetContent);
         drawable->id = env->GetIntField(drawableObj, cache.drawableID);
-        drawable->texture = nullptr;
+        drawable->glTexture = nullptr;
         drawable->width = env->GetShortField(drawableObj, cache.drawableWidth);
         drawable->height = env->GetShortField(drawableObj, cache.drawableHeight);
         drawable->data = nullptr;
@@ -269,14 +278,18 @@ Java_com_winlator_cmod_widget_XServerView_nativeDestroyWindow(JNIEnv *env, jobje
     
     if (xserver.isDisplayX()) {
         displayX.queueEvent([window] { 
+            if (window->inputOutput && window->drawable->composerTexture != nullptr)
+                effectComposer.destroyComposerTexture(window->drawable.get());
+                
             displayX.destroyWindowControl(window);
             windowManager.deleteWindow(window); 
         });
     }    
     else {
         renderer.queueEvent([window] { 
-            if (window->inputOutput && window->drawable->texture != nullptr) 
-                renderer.destroyTexture(window->drawable->texture.get());
+            if (window->inputOutput && window->drawable->glTexture != nullptr) 
+                renderer.destroyTexture(window->drawable->glTexture.get());
+                
             windowManager.deleteWindow(window);
             renderer.updateScene(); 
         });
@@ -296,7 +309,7 @@ Java_com_winlator_cmod_widget_XServerView_nativeCreateCursor(JNIEnv *env, jobjec
     drawable->format = env->GetIntField(drawableObj, cache.drawableFormat);
     drawable->isDirectContent = false;
     drawable->isDisplayX = false;
-    drawable->texture = nullptr;
+    drawable->glTexture = nullptr;
     drawable->drawableObj = env->NewGlobalRef(drawableObj);
     
     env->DeleteLocalRef(drawableObj);
@@ -320,7 +333,7 @@ Java_com_winlator_cmod_widget_XServerView_nativeFreeCursor(JNIEnv *env, jobject 
     if (!xserver.isDisplayX()) {
         renderer.queueEvent([cursor] { 
             JNIEnv *env = cache.getEnv();
-            renderer.destroyTexture(cursor->image->texture.get()); 
+            renderer.destroyTexture(cursor->image->glTexture.get()); 
             cursorManager.removeCursor(env, cursor);
         });
     }
@@ -402,7 +415,8 @@ Java_com_winlator_cmod_widget_XServerView_nativeUpdateWindowGeometry(JNIEnv *env
         window->drawable->height = height;
         window->drawable->ahb = (AHardwareBuffer *)env->GetLongField(window->drawable->drawableObj, cache.drawableAHB);
         window->drawable->stride = env->GetShortField(window->drawable->drawableObj, cache.drawableStride);
-        if (window->drawable->texture != nullptr) window->drawable->texture->sizeChanged = true;
+        if (window->drawable->glTexture != nullptr) window->drawable->glTexture->sizeChanged = true;
+        if (window->drawable->composerTexture != nullptr) window->drawable->composerTexture->sizeChanged = true;
     }
     
     if (xserver.isDisplayX()) {
@@ -425,8 +439,9 @@ Java_com_winlator_cmod_widget_XServerView_nativeUpdateWindowContent(JNIEnv *env,
     
     window->hasContent = true;
     
-    if (xserver.isDisplayX())
+    if (xserver.isDisplayX()) {
         displayX.requestWindowUpdate(window);
+    }    
     else
         renderer.requestRenderer();
 }
@@ -555,7 +570,7 @@ Java_com_winlator_cmod_widget_XServerView_nativeAddDirectContent(JNIEnv *env, jo
     
     auto drawable = std::make_unique<struct Drawable>();
     drawable->id = env->GetIntField(drawableObj, cache.drawableID);
-    drawable->texture = nullptr;
+    drawable->glTexture = nullptr;
     drawable->width = env->GetShortField(drawableObj, cache.drawableWidth);
     drawable->height = env->GetShortField(drawableObj, cache.drawableHeight);
     drawable->data = nullptr;

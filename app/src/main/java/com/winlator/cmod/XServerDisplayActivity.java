@@ -1,5 +1,8 @@
 package com.winlator.cmod;
 
+import android.app.NotificationChannel;
+import android.app.NotificationManager;
+import android.content.Context;
 import com.winlator.cmod.contentdialog.DisplayXConfigDialog;
 import static com.winlator.cmod.core.AppUtils.showToast;
 
@@ -152,6 +155,7 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
     private KeyValueSet displayxConfig;
     private String startupSelection;
     private WineInfo wineInfo;
+    private Intent notificationService;
     private final EnvVars envVars = new EnvVars();
     private boolean firstTimeBoot = false;
     private SharedPreferences preferences;
@@ -204,7 +208,9 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
     
     public boolean performanceMode;
     public boolean presentRR;
-
+    public boolean backPressure;
+    public boolean precisePresentation;
+     
     @Override
     public void onConfigurationChanged(@NonNull Configuration newConfig) {
         super.onConfigurationChanged(newConfig);
@@ -213,7 +219,6 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
             configChangedCallback = null;
         }
     }
-
 
     private final SensorEventListener gyroListener = new SensorEventListener() {
         @Override
@@ -264,7 +269,7 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
         AppUtils.keepScreenOn(this);
 
         setContentView(R.layout.xserver_display_activity);
-
+        
         preloaderDialog = new PreloaderDialog(this);
         preferences = PreferenceManager.getDefaultSharedPreferences(this);
         
@@ -509,6 +514,8 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
             this.displayxConfig = DisplayXConfigDialog.parseConfig(displayxConfig);
             this.performanceMode = this.displayxConfig.get("performanceMode").equals("1") ? true : false;
             this.presentRR = this.displayxConfig.get("presentRR").equals("1") ? true : false;
+            this.backPressure = this.displayxConfig.get("backPressure").equals("1") ? true : false;
+            this.precisePresentation = this.displayxConfig.get("precisePresentation").equals("1") ? true : false;
         }
 
         this.graphicsDriverConfig = GraphicsDriverConfigDialog.parseGraphicsDriverConfig(graphicsDriverConfig);
@@ -529,6 +536,23 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
         xServer.setWinHandler(winHandler);
 
         boolean[] winStarted = {false};
+        
+        notificationService = new Intent(this, NotificationService.class);
+        
+        if (Build.VERSION.SDK_INT >= 33 && ContextCompat.checkSelfPermission(this, android.Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED) {
+            AppUtils.createNotificationChannel(this, MainActivity.NOTIFICATION_CHANNEL_ID, "Winlator", "Winlator KeepAlive Service", NotificationManager.IMPORTANCE_LOW);
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
+                startForegroundService(notificationService);
+            else    
+                startService(notificationService);
+        }    
+        else if (Build.VERSION.SDK_INT < 33) {
+            AppUtils.createNotificationChannel(this, MainActivity.NOTIFICATION_CHANNEL_ID, "Winlator", "Winlator KeepAlive Service", NotificationManager.IMPORTANCE_LOW);
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
+                startForegroundService(notificationService);
+            else    
+                startService(notificationService);
+        }
 
         // Add the OnWindowModificationListener for dynamic workarounds
         xServer.windowManager.addOnWindowModificationListener(new WindowManager.OnWindowModificationListener() {
@@ -598,11 +622,6 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
 
         // Check if a profile is defined by the shortcut
         String controlsProfile = shortcut != null ? shortcut.getExtra("controlsProfile", "") : "";
-        
-        if (!NotificationService.isRunning()) {
-            Intent notificationService = new Intent(this, NotificationService.class);
-            startForegroundService(notificationService);
-        }
 		
         Runnable runnable = () -> {
             setupUI();
@@ -767,16 +786,16 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
         if (!isInPictureInPictureMode() && isSuspendEnabled)
         	ProcessHelper.resumeAllWineProcesses();
             
-        if (NotificationService.wakeLock != null && NotificationService.wakeLock.isHeld())  
-            NotificationService.wakeLock.release();
+        if (NotificationService.isRunning())  
+            NotificationService.releaseLock();
     }
 
     @Override
     public void onPause() {
         super.onPause();
         
-        if (NotificationService.wakeLock != null && !NotificationService.wakeLock.isHeld())
-            NotificationService.wakeLock.acquire();
+        if (NotificationService.isRunning())
+            NotificationService.acquireLock();
             
         boolean gyroEnabled = preferences.getBoolean("gyro_enabled", true);
 
@@ -859,6 +878,12 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
                     }
                 }
                 preloaderDialog.closeOnUiThread();
+                
+                if (NotificationService.isRunning()) {
+                    NotificationService.releaseLock();
+                    stopService(notificationService);
+                }
+                
                 AppUtils.restartApplication(getApplicationContext());
             }
         }, 1000);

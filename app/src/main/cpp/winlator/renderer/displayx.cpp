@@ -32,6 +32,7 @@ using PFNASURFACETRANSACTIONREPARENT = void (*)(ASurfaceTransaction*, ASurfaceCo
 using PFNASURFACETRANSACTIONSETONCOMPLETE = void (*)(ASurfaceTransaction*, void*, ASurfaceTransaction_OnComplete);
 using PFNASURFACETRANSACTIONSETONCOMMIT = void (*)(ASurfaceTransaction*, void*, ASurfaceTransaction_OnCommit);
 using PFNASURFACETRANSACTIONSETENABLEBACKPRESSURE = void (*)(ASurfaceTransaction*, ASurfaceControl*, bool);
+using PFNASURFACETRANSACTIONSETFRAMETIMELINE = void (*)(ASurfaceTransaction*, AVsyncId);
 using PFNASURFACETRANSACTIONCREATE = ASurfaceTransaction* (*)();
 using PFNASURFACETRANSACTIONDELETE = void (*)(ASurfaceTransaction*);
 using PFNASURFACETRANSACTIONAPPLY = void (*)(ASurfaceTransaction*);
@@ -43,6 +44,10 @@ using PFNASURFACECONTROLCREATEFROMWINDOW = ASurfaceControl* (*)(ANativeWindow*, 
 
 using PFNACHOREOGRAPHERGETINSTANCE = AChoreographer* (*)();
 using PFNACHOREOGRAPHERPOSTFRAMECALLBACK64 = void (*)(AChoreographer*, AChoreographer_frameCallback64, void*);
+using PFNACHOREOGRAPHERPOSTVSYNCCALLBACK = void (*)(AChoreographer*, AChoreographer_vsyncCallback, void*);
+using PFNACHOREOGRAPHERGETFRAMETIMELINEVSYNCID = AVsyncId (*)(const AChoreographerFrameCallbackData*, size_t);
+using PFNACHOREOGRAPHERGETPREFERREDTIMELINEINDEX = size_t (*)(const AChoreographerFrameCallbackData*);
+
 
 using PFNAPERFORMANCEHINTGETMANAGER = APerformanceHintManager* (*)();
 using PFNAPERFORMANCEHINTCREATESESSION = APerformanceHintSession* (*)(APerformanceHintManager*, const int32_t*, size_t, int64_t);
@@ -62,6 +67,7 @@ static PFNASURFACETRANSACTIONSETONCOMPLETE pfnASurfaceTransactionSetOnComplete =
 static PFNASURFACETRANSACTIONSETONCOMMIT pfnASurfaceTransactionSetOnCommit = nullptr;
 static PFNASURFACETRANSACTIONSETENABLEBACKPRESSURE pfnASurfaceTransactionSetEnableBackPressure = nullptr;
 static PFNASURFACETRANSACTIONSTATSGETPRESENTFENCEFD pfnASurfaceTransactionStatsGetPresentFenceFd = nullptr;
+static PFNASURFACETRANSACTIONSETFRAMETIMELINE pfnASurfaceTransactionSetFrameTimeline = nullptr;
 static PFNASURFACETRANSACTIONCREATE pfnASurfaceTransactionCreate = nullptr;
 static PFNASURFACETRANSACTIONDELETE pfnASurfaceTransactionDelete = nullptr;
 static PFNASURFACETRANSACTIONAPPLY pfnASurfaceTransactionApply = nullptr;
@@ -73,6 +79,9 @@ static PFNASURFACECONTROLCREATEFROMWINDOW pfnASurfaceControlCreateFromWindow = n
 
 static PFNACHOREOGRAPHERGETINSTANCE pfnAChoreographerGetInstance = nullptr;
 static PFNACHOREOGRAPHERPOSTFRAMECALLBACK64 pfnAChoreographerPostFrameCallback64 = nullptr;
+static PFNACHOREOGRAPHERPOSTVSYNCCALLBACK pfnAChoreographerPostVsyncCallback = nullptr;
+static PFNACHOREOGRAPHERGETFRAMETIMELINEVSYNCID pfnAChoreographerGetFrameTimelineVsyncId = nullptr;
+static PFNACHOREOGRAPHERGETPREFERREDTIMELINEINDEX pfnAChoreographerGetPreferredTimelineIndex = nullptr;
 
 static PFNAPERFORMANCEHINTGETMANAGER pfnAPerformanceHintGetManager = nullptr;
 static PFNAPERFORMANCEHINTCREATESESSION pfnAPerformanceHintCreateSession = nullptr;
@@ -96,6 +105,28 @@ void DisplayX::onFrameCallback64(int64_t frameTimeNanos, void* data) {
     }
     
     pfnAChoreographerPostFrameCallback64(self->choreographer, DisplayX::onFrameCallback64, self);
+}
+
+void DisplayX::onVsyncCallback(const AChoreographerFrameCallbackData* callbackData, void* data) {
+    auto *self = reinterpret_cast<DisplayX *>(data);
+   
+    if (self->cursorUpdate && self->cursorManager->control && !self->paused) {
+        self->eventLock.notify();
+    }
+    
+    size_t index = pfnAChoreographerGetPreferredTimelineIndex(callbackData);
+    AVsyncId id = pfnAChoreographerGetFrameTimelineVsyncId(callbackData, index);
+    
+    {
+        auto lock = self->presentLock.lock();
+        self->vsyncId = id;
+        if (!self->presentRequests.empty() && self->presentRR) {
+            self->requestUpdate = true;
+            self->presentLock.notify();
+        }
+    }
+    
+    pfnAChoreographerPostVsyncCallback(self->choreographer, DisplayX::onVsyncCallback, self);
 }
 
 static void sendFD(int& socket, int fd) {
@@ -470,6 +501,8 @@ void DisplayX::presentThreadLoop() {
             requests.push(std::move(presentRequest));
         }
         
+        if (vsyncId > -1) pfnASurfaceTransactionSetFrameTimeline(presentTransaction, vsyncId);
+        
         if (presentRR) requestUpdate = false;
         lock.unlock();
         
@@ -491,12 +524,23 @@ void DisplayX::presentThreadLoop() {
                 pfnASurfaceTransactionSetBuffer(presentTransaction, window->control, nullptr, presentRequest->sync_fence);
             }
             else {
-                pfnASurfaceTransactionSetBuffer(presentTransaction, window->control, drawable->ahb, presentRequest->sync_fence);
+                if (effectComposer->isSuitableForColorSwap(drawable)) {
+                    effectComposer->apply(drawable);
+                    pfnASurfaceTransactionSetBuffer(presentTransaction, window->control, drawable->composerTexture->dstBuffer, presentRequest->sync_fence);
+                }
+                else {
+                    pfnASurfaceTransactionSetBuffer(presentTransaction, window->control, drawable->ahb, presentRequest->sync_fence);
+                }
+                
                 if (drawable->isDisplayX || drawable->isDirectContent) pfnASurfaceTransactionSetBufferTransparency(presentTransaction, window->control, ASURFACE_TRANSACTION_TRANSPARENCY_OPAQUE);
                 if (drawable->isDisplayX) {
                    completeContext->requests.push_back(std::move(presentRequest));
                    env->CallVoidMethod(xServer->xserverDisplayActivity, cache->updateFrameRating, window->windowObj);
                 }    
+                if (!window->backPressureEnabled && pfnASurfaceTransactionSetEnableBackPressure && backPressure)  {
+                    pfnASurfaceTransactionSetEnableBackPressure(presentTransaction, window->control, true);
+                    window->backPressureEnabled = true;
+                }
             }
         }
         
@@ -524,6 +568,8 @@ void DisplayX::start() {
     pfnASurfaceTransactionSetBufferAlpha = reinterpret_cast<PFNASURFACETRANSACTIONSETBUFFERALPHA>(dlsym(handle, "ASurfaceTransaction_setBufferAlpha"));
     pfnASurfaceTransactionSetBufferTransparency = reinterpret_cast<PFNASURFACETRANSACTIONSETBUFFERTRANSPARENCY>(dlsym(handle, "ASurfaceTransaction_setBufferTransparency"));
     pfnASurfaceTransactionStatsGetPresentFenceFd = reinterpret_cast<PFNASURFACETRANSACTIONSTATSGETPRESENTFENCEFD>(dlsym(handle, "ASurfaceTransactionStats_getPresentFenceFd"));
+    pfnASurfaceTransactionSetFrameTimeline = reinterpret_cast<PFNASURFACETRANSACTIONSETFRAMETIMELINE>(dlsym(handle, "ASurfaceTransaction_setFrameTimeline"));
+
     pfnASurfaceTransactionCreate = reinterpret_cast<PFNASURFACETRANSACTIONCREATE>(dlsym(handle,"ASurfaceTransaction_create"));
     pfnASurfaceTransactionDelete = reinterpret_cast<PFNASURFACETRANSACTIONDELETE>(dlsym(handle,"ASurfaceTransaction_delete"));
     pfnASurfaceTransactionApply = reinterpret_cast<PFNASURFACETRANSACTIONAPPLY>(dlsym(handle,"ASurfaceTransaction_apply"));
@@ -535,6 +581,9 @@ void DisplayX::start() {
 
     pfnAChoreographerGetInstance = reinterpret_cast<PFNACHOREOGRAPHERGETINSTANCE>(dlsym(handle,"AChoreographer_getInstance"));
     pfnAChoreographerPostFrameCallback64 = reinterpret_cast<PFNACHOREOGRAPHERPOSTFRAMECALLBACK64>(dlsym(handle,"AChoreographer_postFrameCallback64"));
+    pfnAChoreographerPostVsyncCallback = reinterpret_cast<PFNACHOREOGRAPHERPOSTVSYNCCALLBACK>(dlsym(handle, "AChoreographer_postVsyncCallback"));
+    pfnAChoreographerGetFrameTimelineVsyncId = reinterpret_cast<PFNACHOREOGRAPHERGETFRAMETIMELINEVSYNCID>(dlsym(handle, "AChoreographerFrameCallbackData_getFrameTimelineVsyncId"));
+    pfnAChoreographerGetPreferredTimelineIndex = reinterpret_cast<PFNACHOREOGRAPHERGETPREFERREDTIMELINEINDEX>(dlsym(handle, "AChoreographerFrameCallbackData_getPreferredFrameTimelineIndex"));
     
     pfnAPerformanceHintGetManager = reinterpret_cast<PFNAPERFORMANCEHINTGETMANAGER>(dlsym(handle, "APerformanceHint_getManager"));
     pfnAPerformanceHintCreateSession = reinterpret_cast<PFNAPERFORMANCEHINTCREATESESSION>(dlsym(handle, "APerformanceHint_createSession"));
@@ -547,7 +596,11 @@ void DisplayX::start() {
     presentThread = std::thread(&DisplayX::presentThreadLoop, this);
    
     this->choreographer = pfnAChoreographerGetInstance();
-    pfnAChoreographerPostFrameCallback64(this->choreographer, DisplayX::onFrameCallback64, this);
+    
+    if (precisePresentation && pfnAChoreographerPostVsyncCallback)
+        pfnAChoreographerPostVsyncCallback(this->choreographer, DisplayX::onVsyncCallback, this);
+    else     
+        pfnAChoreographerPostFrameCallback64(this->choreographer, DisplayX::onFrameCallback64, this);
 }
 
 void DisplayX::stop() {
@@ -631,7 +684,6 @@ void DisplayX::createWindowControl(Window *window) {
     if (pfnASurfaceControlAcquire)    
         pfnASurfaceControlAcquire(window->control);
     
-    pfnASurfaceTransactionSetEnableBackPressure(windowTransaction, window->control, false);
     pfnASurfaceTransactionSetZOrder(windowTransaction, window->control, window->z_order);
     pfnASurfaceTransactionSetVisibility(windowTransaction, window->control, ASURFACE_TRANSACTION_VISIBILITY_HIDE);
     
@@ -952,4 +1004,12 @@ void DisplayX::setPerformanceMode(bool perfMode) {
 
 void DisplayX::setPresentRR(bool presentRR) {
     this->presentRR = presentRR;
+}
+
+void DisplayX::setBackPressure(bool backPressure) {
+    this->backPressure = backPressure;
+}
+
+void DisplayX::setPrecisePresentation(bool precisePresentation) {
+    this->precisePresentation = precisePresentation;
 }

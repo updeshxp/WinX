@@ -30,9 +30,11 @@ add_library(winlator SHARED
         winlator/renderer/xform.cpp
         winlator/renderer/view_transformation.cpp
         winlator/renderer/displayx.cpp
+        winlator/renderer/effectcomposer/effect_composer.cpp
 )
 
 target_compile_options(winlator PRIVATE -Wall -Wextra)
+target_include_directories(winlator PRIVATE winlator/renderer winlator/renderer/effectcomposer)
 
 target_link_libraries(winlator
         log
@@ -44,4 +46,5 @@ target_link_libraries(winlator
         GLESv2
         GLESv3
         adrenotools
+        vulkan
 )

@@ -14,6 +14,9 @@
 #include <GLES2/gl2.h>
 #include <GLES2/gl2ext.h>
 
+#include <vulkan/vulkan.h>
+#include <vulkan/vulkan_android.h>
+
 #define HAL_PIXEL_FORMAT_BGRA_8888 5
 
 #define LOAD_METHOD_ID(method, env, cls, name, sig) \
@@ -91,7 +94,9 @@ class JNICache {
         jclass xserverDisplayActivityClass;
         jmethodID updateFrameRating;
         jfieldID performanceMode;
+        jfieldID backPressure;
         jfieldID presentRR;
+        jfieldID precisePresentation;
         
         JNICache() {}
         
@@ -162,6 +167,8 @@ class JNICache {
             LOAD_METHOD_ID(getRefreshRate, env, xserverDisplayActivityClass, "getRefreshRate", "()F");
             LOAD_FIELD_ID(performanceMode, env, xserverDisplayActivityClass, "performanceMode", "Z");
             LOAD_FIELD_ID(presentRR, env, xserverDisplayActivityClass, "presentRR", "Z");
+            LOAD_FIELD_ID(backPressure, env, xserverDisplayActivityClass, "backPressure", "Z");
+            LOAD_FIELD_ID(precisePresentation, env, xserverDisplayActivityClass, "precisePresentation", "Z");
             
             this->xserverClass = (jclass)env->NewGlobalRef(xServerClass);
             this->windowClass = (jclass)env->NewGlobalRef(windowClass);

@@ -15,6 +15,7 @@
 #include "renderer_jni.hpp"
 #include "view_transformation.hpp"
 #include "window.hpp"
+#include "effect_composer.hpp"
 #include "cursor.hpp"
 
 class DisplayX {
@@ -58,21 +59,32 @@ class DisplayX {
         class PresentQueue {
             private:
                 std::queue<std::unique_ptr<PresentRequest>> mQueue;
+                std::unordered_set<Window *> mSet;
 
             public:
                 void push(std::unique_ptr<PresentRequest> request) {
-                    if (!request)
+                    if (!request || !request->window)
                         return;
-
+                        
+                    if (mSet.count(request->window)) {
+                        if (request->sync_fence >= 0)
+                            close(request->sync_fence);
+                            
+                        return;
+                    }        
+                    
+                    mSet.insert(request->window);     
                     mQueue.push(std::move(request));
                 }
 
                 std::unique_ptr<PresentRequest> pop() {
                     if (mQueue.empty())
                         return nullptr;
-
+                    
                     auto val = std::move(mQueue.front());
                     mQueue.pop();
+                    
+                    mSet.erase(val->window);
                     return val;
                 }
 
@@ -121,17 +133,21 @@ class DisplayX {
         std::atomic_bool surfaceChanged{false};
         std::atomic_bool perfMode{true};
         std::atomic_bool presentRR{true};
+        std::atomic_bool backPressure{false};
+        std::atomic_bool precisePresentation{false};
         
         bool requestUpdate = false;
         
         bool fullscreen = false;
         int eventsPending = 0;
         int64_t previousReportedWorkTime = 0;
+        AVsyncId vsyncId = -1;
         
         void eventThreadLoop();
         void networkThreadLoop();
         void presentThreadLoop();
         static void onFrameCallback64(int64_t frameTimeNanos, void *data);
+        static void onVsyncCallback(const AChoreographerFrameCallbackData* callbackData, void* data);
         static void onCommitCallback(void *context, ASurfaceTransactionStats *stats);
         static void onCompleteCallback(void *context, ASurfaceTransactionStats *stats);
         int64_t getCurrentTimeNanos();
@@ -149,6 +165,7 @@ class DisplayX {
         CursorManager *cursorManager;
         JNIXServer *xServer;
         JNICache *cache;
+        EffectComposer *effectComposer;
         
         bool cursorVisible = false;
         
@@ -177,4 +194,6 @@ class DisplayX {
         void toggleFullscreen();
         void setPerformanceMode(bool perfMode);
         void setPresentRR(bool presentRR);
+        void setBackPressure(bool backPressure);
+        void setPrecisePresentation(bool precisePresentation);
 };

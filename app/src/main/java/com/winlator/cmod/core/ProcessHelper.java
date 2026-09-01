@@ -49,6 +49,12 @@ public abstract class ProcessHelper {
             terminateProcess(Integer.parseInt(process));
         }
     }
+    
+    public static void killAllWineProcesses() {
+        for (String process : listRunningWineProcesses()) {
+            killProcess(Integer.parseInt(process));
+        }
+    }
 
     public static void pauseAllWineProcesses() {
         for (String process : listRunningWineProcesses()) {
@@ -264,7 +270,7 @@ public abstract class ProcessHelper {
         List<String> filterList = Arrays.asList(filters);
         allPids = proc.list(new FilenameFilter(){
             public boolean accept(File proc, String filename){
-                return new File(proc, filename).isDirectory() && filename.matches("[0-9]+");
+                return new File(proc, filename).isDirectory() && Character.isDigit(filename.charAt(0));
             }
         });
 
