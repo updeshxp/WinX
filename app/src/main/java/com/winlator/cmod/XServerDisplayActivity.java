@@ -1694,10 +1694,11 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
     @Override
     public boolean dispatchKeyEvent(KeyEvent event) {
 
-        // Handle the PlayStation or Xbox Home button to open the drawer
+        // Handle the PlayStation or Xbox Home button and Controller Back button to open the drawer
+        boolean isBackFromController = event.getKeyCode() == KeyEvent.KEYCODE_BACK && (event.getFlags() & KeyEvent.FLAG_FALLBACK) == 0;
         if (event.getAction() == KeyEvent.ACTION_DOWN) {
-            if (event.getKeyCode() == KeyEvent.KEYCODE_BUTTON_MODE || event.getKeyCode() == KeyEvent.KEYCODE_HOME || event.getKeyCode() == KeyEvent.KEYCODE_BUTTON_SELECT) {
-                boolean handled = inputControlsView.onKeyEvent(event) || (winHandler != null && winHandler.onKeyEvent(event)) && (xServer != null && xServer.keyboard.onKeyEvent(event));
+            if (event.getKeyCode() == KeyEvent.KEYCODE_BUTTON_MODE || event.getKeyCode() == KeyEvent.KEYCODE_HOME || isBackFromController) {
+                onBackPressed();
                 return true;
             }
         }
