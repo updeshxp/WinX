@@ -1696,8 +1696,8 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
         // AYN handhelds (Odin 2, Odin 3, and similar) emit the system Back key
         // from the built-in gamepad (linux KEY_BACK / Android KEYCODE_BACK on the
         // same device as the face buttons). Controller events never reach
-        // super.dispatchKeyEvent(), so onBackPressed() — which the edge-swipe
-        // gesture uses to toggle the in-game menu — would not run.
+        // super.dispatchKeyEvent(), so onBackPressed() -- which the edge-swipe
+        // gesture uses to toggle the in-game menu -- would not run.
         if (event.getKeyCode() == KeyEvent.KEYCODE_BACK) {
             if (inputControlsView != null && inputControlsView.onKeyEvent(event)) return true;
             if (event.getAction() == KeyEvent.ACTION_UP && !event.isCanceled()) onBackPressed();
