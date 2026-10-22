@@ -38,6 +38,7 @@ import androidx.fragment.app.FragmentManager;
 import androidx.preference.PreferenceManager;
 
 import com.google.android.material.navigation.NavigationView;
+import com.winlator.cmod.FileManagerFragment;
 import com.winlator.cmod.R;
 import com.winlator.cmod.contentdialog.ContentDialog;
 import com.winlator.cmod.core.Callback;
@@ -199,6 +200,9 @@ public class MainActivity extends AppCompatActivity implements NavigationView.On
                 break;
             case R.id.main_menu_input_controls:
                 show(new InputControlsFragment(selectedProfileId), false);  // Forward animation
+                break;
+            case R.id.main_menu_file_manager:
+                show(new FileManagerFragment(), false);
                 break;
             case R.id.main_menu_contents:
                 show(new ContentsFragment(), false);  // Forward animation
