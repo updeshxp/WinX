@@ -24,6 +24,8 @@
         <item name="colorPrimaryDark">@color/colorPrimaryDarkModeDark</item>
         <item name="android:windowBackground">@color/window_background_color_dark</item>
         <item name="android:colorBackground">@color/window_background_color_dark</item>
+        <item name="android:statusBarColor">@color/window_background_color_dark</item>
+        <item name="android:navigationBarColor">@color/window_background_color_dark</item>
         <item name="android:textViewStyle">@style/TextView.Dark</item>
         <item name="android:checkboxStyle">@style/CheckBox.Dark</item>
         <item name="android:listPopupWindowStyle">@style/ListPopupWindow.Dark</item>

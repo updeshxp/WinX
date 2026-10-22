@@ -1,0 +1,882 @@
+package com.winlator.cmod;
+
+import android.app.Activity;
+import android.app.AlertDialog;
+import android.content.Intent;
+import android.os.Bundle;
+import android.os.Environment;
+import android.os.Handler;
+import android.os.Looper;
+import android.view.LayoutInflater;
+import android.view.View;
+import android.view.ViewGroup;
+import android.widget.EditText;
+import android.widget.ImageView;
+import android.widget.LinearLayout;
+import android.widget.PopupMenu;
+import android.widget.ProgressBar;
+import android.widget.TextView;
+import android.widget.Toast;
+
+import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
+import androidx.appcompat.app.AppCompatActivity;
+import androidx.fragment.app.Fragment;
+import androidx.recyclerview.widget.DividerItemDecoration;
+import androidx.recyclerview.widget.LinearLayoutManager;
+import androidx.recyclerview.widget.RecyclerView;
+
+import com.google.android.material.floatingactionbutton.FloatingActionButton;
+import com.winlator.cmod.R;
+import com.winlator.cmod.container.Container;
+import com.winlator.cmod.container.ContainerManager;
+import com.winlator.cmod.core.ExeIconExtractor;
+import com.winlator.cmod.core.FileUtils;
+import com.winlator.cmod.xenvironment.ImageFs;
+import com.winlator.cmod.core.StringUtils;
+
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
+import java.io.FileWriter;
+import java.io.IOException;
+import java.io.PrintWriter;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.List;
+import java.util.concurrent.atomic.AtomicLong;
+
+public class FileManagerFragment extends Fragment {
+
+    private RecyclerView recyclerView;
+    private TextView tvCurrentPath;
+    private LinearLayout llDriveSelect;
+    private ImageView ivDriveIcon;
+    private TextView tvDriveName;
+    private File currentDir;
+    private FileAdapter adapter;
+    private ContainerManager containerManager;
+    private FloatingActionButton fabPaste; 
+    private File clipboardFile = null;
+    private boolean isCutOperation = false;
+    private AlertDialog progressDialog;
+    private ProgressBar progressBar;
+    private TextView progressText;
+    private TextView progressPercent;
+    private boolean isOperationCancelled = false;
+
+    private interface ContainerAction {
+        void onContainerSelected(Container container);
+    }
+
+    @Override
+    public void onCreate(@Nullable Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+        containerManager = new ContainerManager(getContext());
+    }
+
+    @Override
+    public void onViewCreated(@NonNull View view, @Nullable Bundle savedInstanceState) {
+        super.onViewCreated(view, savedInstanceState);
+        if (getActivity() != null && ((AppCompatActivity) getActivity()).getSupportActionBar() != null) {
+            ((AppCompatActivity) getActivity()).getSupportActionBar().setTitle(R.string.file_manager);
+        }
+    }
+
+    @Nullable
+    @Override
+    public View onCreateView(@NonNull LayoutInflater inflater, @Nullable ViewGroup container, @Nullable Bundle savedInstanceState) {
+        View view = inflater.inflate(R.layout.file_manager_fragment, container, false);
+
+        tvCurrentPath = view.findViewById(R.id.TVCurrentPath);
+        recyclerView = view.findViewById(R.id.RecyclerViewFiles);
+        llDriveSelect = view.findViewById(R.id.LLDriveSelect);
+        ivDriveIcon = view.findViewById(R.id.IVDriveIcon);
+        tvDriveName = view.findViewById(R.id.TVDriveName);
+
+        view.findViewById(R.id.BTUpDir).setOnClickListener(v -> navigateUp());
+
+        if (llDriveSelect != null) {
+            llDriveSelect.setOnClickListener(v -> showDriveMenu());
+        }
+
+        fabPaste = view.findViewById(R.id.fabPaste);
+        if (fabPaste != null) {
+            fabPaste.setVisibility(View.GONE);
+            fabPaste.setOnClickListener(v -> startPasteOperation());
+        }
+
+        recyclerView.setLayoutManager(new LinearLayoutManager(getContext()));
+        recyclerView.addItemDecoration(new DividerItemDecoration(getContext(), DividerItemDecoration.VERTICAL));
+
+        currentDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
+        if (!currentDir.exists()) {
+            currentDir = Environment.getExternalStorageDirectory(); 
+        }
+        loadDirectory(currentDir);
+
+        return view;
+    }
+
+    private void showDriveMenu() {
+        PopupMenu popup = new PopupMenu(getContext(), llDriveSelect);
+        
+        popup.getMenu().add("Drive D: (Downloads)").setOnMenuItemClickListener(item -> {
+            File downloadDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
+            if (downloadDir.exists()) {
+                loadDirectory(downloadDir);
+            } else {
+                loadDirectory(Environment.getExternalStorageDirectory());
+            }
+            return true;
+        });
+
+        File storageRoot = new File("/storage");
+        File[] externalDrives = storageRoot.listFiles();
+        if (externalDrives != null) {
+            for (File drive : externalDrives) {
+                if (!drive.getName().equals("emulated") && !drive.getName().equals("self")) {
+                    boolean alreadyAdded = false; 
+                    if (!alreadyAdded) {
+                        popup.getMenu().add("External (" + drive.getName() + ")").setOnMenuItemClickListener(item -> {
+                            loadDirectory(drive);
+                            return true;
+                        });
+                    }
+                }
+            }
+        }
+
+        popup.getMenu().add("Drive C: (Wine System)").setOnMenuItemClickListener(item -> {
+            handleDriveCSelection();
+            return true;
+        });
+
+        popup.getMenu().add("Drive Z: (RootFS)").setOnMenuItemClickListener(item -> {
+            File rootFs = new File(getContext().getFilesDir(), "imagefs");
+            if (rootFs.exists()) loadDirectory(rootFs);
+            else Toast.makeText(getContext(), "RootFS not found", Toast.LENGTH_SHORT).show();
+            return true;
+        });
+
+        popup.show();
+    }
+
+    private void handleDriveCSelection() {
+        ArrayList<Container> containers = containerManager.getContainers();
+
+        if (containers == null || containers.isEmpty()) {
+            new AlertDialog.Builder(getContext())
+                .setTitle(R.string.no_containers)
+                .setMessage("You need to create a container first to access Drive C:.")
+                .setPositiveButton(R.string.ok, null)
+                .show();
+            return;
+        }
+
+        if (containers.size() == 1) {
+            navigateToContainerDriveC(containers.get(0));
+        } else {
+            String[] names = new String[containers.size()];
+            for (int i = 0; i < containers.size(); i++) names[i] = containers.get(i).getName();
+
+            new AlertDialog.Builder(getContext())
+                .setTitle("Select Container Drive C:")
+                .setItems(names, (dialog, which) -> navigateToContainerDriveC(containers.get(which)))
+                .show();
+        }
+    }
+
+    private void navigateToContainerDriveC(Container container) {
+        File driveC = new File(container.getRootDir(), ".wine/drive_c");
+
+        File windowsDir = new File(driveC, "windows");
+        
+        if (driveC.exists() && driveC.isDirectory() && windowsDir.exists()) {
+            loadDirectory(driveC);
+            Toast.makeText(getContext(), "Opened C: (" + container.getName() + ")", Toast.LENGTH_SHORT).show();
+        } else {
+            new AlertDialog.Builder(getContext())
+                .setTitle("Drive C: Not Initialized")
+                .setMessage("The Wine system files (Drive C:) for '" + container.getName() + "' are missing.\n\n" +
+                           "Please RUN this container once to generate the filesystem.")
+                .setPositiveButton(R.string.ok, null)
+                .show();
+        }
+    }
+
+    private void navigateUp() {
+        if (currentDir == null) return;
+        File parent = currentDir.getParentFile();
+        if (parent != null && parent.canRead()) {
+            loadDirectory(parent);
+        } else {
+            Toast.makeText(getContext(), "Root reached", Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    private void loadDirectory(File dir) {
+        currentDir = dir;
+        tvCurrentPath.setText(dir.getAbsolutePath());
+        updateDriveButtonLabel(dir);
+
+        File[] files = dir.listFiles();
+        List<File> fileList = new ArrayList<>();
+        if (files != null) {
+            fileList.addAll(Arrays.asList(files));
+        }
+
+        Collections.sort(fileList, (f1, f2) -> {
+            if (f1.isDirectory() && !f2.isDirectory()) return -1;
+            if (!f1.isDirectory() && f2.isDirectory()) return 1;
+            if (!f1.isDirectory() && !f2.isDirectory()) {
+                boolean isExe1 = isExecutable(f1);
+                boolean isExe2 = isExecutable(f2);
+                if (isExe1 && !isExe2) return -1;
+                if (!isExe1 && isExe2) return 1;
+            }
+            return f1.getName().compareToIgnoreCase(f2.getName());
+        });
+
+        adapter = new FileAdapter(fileList);
+        recyclerView.setAdapter(adapter);
+        
+        if (fabPaste != null) {
+            fabPaste.setVisibility(clipboardFile != null ? View.VISIBLE : View.GONE);
+        }
+    }
+
+    private void updateDriveButtonLabel(File dir) {
+        if (tvDriveName == null || ivDriveIcon == null) return;
+        
+        String path = dir.getAbsolutePath();
+        if (path.contains("/drive_c")) {
+            tvDriveName.setText("Drive C:");
+            ivDriveIcon.setImageResource(R.drawable.icon_wine); 
+        } else if (path.startsWith(Environment.getExternalStorageDirectory().getAbsolutePath())) {
+            tvDriveName.setText("Drive D:");
+            ivDriveIcon.setImageResource(R.drawable.ic_internal_storage);
+        } else if (path.startsWith("/storage") && !path.contains("emulated")) {
+             tvDriveName.setText("External");
+             ivDriveIcon.setImageResource(android.R.drawable.stat_sys_data_bluetooth);
+        } else {
+            tvDriveName.setText("System (Z:)");
+            ivDriveIcon.setImageResource(android.R.drawable.ic_menu_manage);
+        }
+    }
+
+    private void performContainerAction(File file, ContainerAction action) {
+        ArrayList<Container> containers = containerManager.getContainers();
+        if (containers == null || containers.isEmpty()) {
+            Toast.makeText(getContext(), "Create a container first!", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        
+        if (containers.size() == 1) {
+            action.onContainerSelected(containers.get(0));
+        } else {
+            String[] names = new String[containers.size()];
+            for (int i = 0; i < containers.size(); i++) names[i] = containers.get(i).getName();
+            
+            new AlertDialog.Builder(getContext())
+                .setTitle("Select Container")
+                .setItems(names, (dialog, which) -> action.onContainerSelected(containers.get(which)))
+                .show();
+        }
+    }
+
+    private String normalizeFilePath(String path) {
+        if (path == null) return "";
+        try {
+            return new File(path).getCanonicalPath();
+        } catch (IOException e) {
+            return new File(path).getAbsolutePath();
+        }
+    }
+
+    private String getContainerWineHome(Container container) {
+        // Returns the wine-internal home path, e.g. "/home/xuser" or "/home/xuser-1".
+        // container.getRootDir() is the Android path: <filesDir>/imagefs/home/xuser-<id>
+        File imagefs = new File(getContext().getFilesDir(), "imagefs");
+        String imagefsPath = normalizeFilePath(imagefs.getAbsolutePath());
+        String rootPath    = normalizeFilePath(container.getRootDir().getAbsolutePath());
+        return rootPath.startsWith(imagefsPath)
+            ? rootPath.substring(imagefsPath.length())   // "/home/xuser-1"
+            : "/home/" + ImageFs.USER;                   // fallback
+    }
+
+    private String toDesktopWindowsPath(File file, Container container) {
+        String filePath = normalizeFilePath(file.getAbsolutePath());
+
+        // C: is implicit — never stored in drivesIterator(). Always <rootDir>/.wine/drive_c
+        File   driveC     = new File(container.getRootDir(), ".wine/drive_c");
+        String driveCPath = normalizeFilePath(driveC.getAbsolutePath());
+        if (filePath.equals(driveCPath) || filePath.startsWith(driveCPath + File.separator)) {
+            String rel = filePath.substring(driveCPath.length()).replace(File.separatorChar, '\\');
+            while (rel.startsWith("\\")) rel = rel.substring(1);
+            return "C:\\" + rel;
+        }
+
+        for (String[] drive : container.drivesIterator()) {
+            if (drive == null || drive.length < 2 || drive[0] == null || drive[1] == null) continue;
+
+            String driveLetter = drive[0].replace(":", "").trim();
+            String drivePath = normalizeFilePath(drive[1]);
+
+            if (driveLetter.isEmpty() || drivePath.isEmpty()) continue;
+
+            if (filePath.equals(drivePath) || filePath.startsWith(drivePath + File.separator)) {
+                String relativePath = filePath.substring(drivePath.length()).replace(File.separatorChar, '\\');
+                while (relativePath.startsWith("\\")) relativePath = relativePath.substring(1);
+                return driveLetter.toUpperCase() + ":\\" + relativePath;
+            }
+        }
+
+        File downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
+        String downloadsPath = normalizeFilePath(downloadsDir.getAbsolutePath());
+
+        if (filePath.equals(downloadsPath) || filePath.startsWith(downloadsPath + File.separator)) {
+            String relativePath = filePath.substring(downloadsPath.length()).replace(File.separatorChar, '\\');
+            while (relativePath.startsWith("\\")) relativePath = relativePath.substring(1);
+            return "D:\\" + relativePath;
+        }
+
+        String externalPath = normalizeFilePath(Environment.getExternalStorageDirectory().getAbsolutePath());
+
+        if (filePath.equals(externalPath) || filePath.startsWith(externalPath + File.separator)) {
+            String relativePath = filePath.substring(externalPath.length()).replace(File.separatorChar, '\\');
+            while (relativePath.startsWith("\\")) relativePath = relativePath.substring(1);
+            return "D:\\" + relativePath;
+        }
+
+        return "Z:" + filePath.replace('/', '\\');
+    }
+
+    private String toDesktopPath(File file, Container container) {
+        File parent = file.getParentFile();
+        if (parent == null) return "";
+
+        String parentPath = normalizeFilePath(parent.getAbsolutePath());
+
+        for (String[] drive : container.drivesIterator()) {
+            if (drive == null || drive.length < 2 || drive[0] == null || drive[1] == null) continue;
+
+            String driveLetter = drive[0].replace(":", "").trim();
+            String drivePath = normalizeFilePath(drive[1]);
+
+            if (driveLetter.isEmpty() || drivePath.isEmpty()) continue;
+
+            if (parentPath.equals(drivePath) || parentPath.startsWith(drivePath + File.separator)) {
+                String relativePath = parentPath.substring(drivePath.length()).replace(File.separatorChar, '/');
+                while (relativePath.startsWith("/")) relativePath = relativePath.substring(1);
+                String basePath = getContainerWineHome(container) + "/.wine/dosdevices/" + driveLetter.toLowerCase() + ":";
+                return relativePath.isEmpty() ? basePath : basePath + "/" + relativePath;
+            }
+        }
+
+        File downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
+        String downloadsPath = normalizeFilePath(downloadsDir.getAbsolutePath());
+
+        if (parentPath.equals(downloadsPath) || parentPath.startsWith(downloadsPath + File.separator)) {
+            String relativePath = parentPath.substring(downloadsPath.length()).replace(File.separatorChar, '/');
+            while (relativePath.startsWith("/")) relativePath = relativePath.substring(1);
+            String dBase = getContainerWineHome(container) + "/.wine/dosdevices/d:";
+            return relativePath.isEmpty() ? dBase : dBase + "/" + relativePath;
+        }
+
+        String externalPath = normalizeFilePath(Environment.getExternalStorageDirectory().getAbsolutePath());
+
+        if (parentPath.equals(externalPath) || parentPath.startsWith(externalPath + File.separator)) {
+            String relativePath = parentPath.substring(externalPath.length()).replace(File.separatorChar, '/');
+            while (relativePath.startsWith("/")) relativePath = relativePath.substring(1);
+            String dBase = getContainerWineHome(container) + "/.wine/dosdevices/d:";
+            return relativePath.isEmpty() ? dBase : dBase + "/" + relativePath;
+        }
+
+        return parentPath;
+    }
+
+    private void writeDesktopEntry(PrintWriter writer, String name, String execPath, String path, String icon, Container container) {
+        writer.println("[Desktop Entry]");
+        writer.println("Name=" + name);
+        // .desktop format requires backslashes doubled (\\) and spaces escaped (\ ).
+        // Without this, Shortcut.unescape() strips every \ treating them as escape
+        // characters, destroying the entire Windows path.
+        String escapedExecPath = StringUtils.escapeFileDOSPath(execPath);
+        String winePrefix = getContainerWineHome(container) + "/.wine";
+        writer.println("Exec=env WINEPREFIX=\"" + winePrefix + "\" wine " + escapedExecPath);
+        writer.println("Type=Application");
+        writer.println("StartupNotify=True");
+        if (path != null && !path.isEmpty()) writer.println("Path=" + path);
+        if (icon != null && !icon.isEmpty()) writer.println("Icon=" + icon);
+        writer.println("container_id:" + container.id);
+    }
+
+    private void runFileDirectly(File file, Container container) {
+        try {
+            File tempShortcut = new File(getContext().getCacheDir(), "temp_run.desktop");
+            String windowsPath = toDesktopWindowsPath(file, container);
+            String winePrefix = getContainerWineHome(container) + "/.wine";
+            String escapedPath = StringUtils.escapeFileDOSPath(windowsPath);
+
+            try (PrintWriter writer = new PrintWriter(new FileWriter(tempShortcut))) {
+                writer.println("[Desktop Entry]");
+                writer.println("Name=" + file.getName());
+                writer.println("Exec=env WINEPREFIX=\"" + winePrefix + "\" wine " + escapedPath);
+                writer.println("Type=Application");
+                writer.println("StartupNotify=True");
+                writer.println("container_id:" + container.id);
+            }
+            Activity activity = getActivity();
+            Intent intent = new Intent(activity, XServerDisplayActivity.class);
+            intent.putExtra("container_id", container.id);
+            intent.putExtra("shortcut_path", tempShortcut.getAbsolutePath());
+            activity.startActivity(intent);
+
+        } catch (Exception e) {
+            Toast.makeText(getContext(), "Error launching: " + e.getMessage(), Toast.LENGTH_LONG).show();
+            e.printStackTrace();
+        }
+    }
+
+    private void createShortcutDirectly(File file, Container container) {
+        try {
+            String displayName = getSmartDisplayName(file);
+            // Convert the Android filesystem path into the Windows path visible to this container.
+            String windowsPath = toDesktopWindowsPath(file, container);
+            // Resolve the game's directory for the desktop entry's working directory.
+            String workingDir = toDesktopPath(file, container);
+            File shortcutsDir = container.getDesktopDir();
+            if (!shortcutsDir.exists() && !shortcutsDir.mkdirs()) {
+                Toast.makeText(getContext(), "Failed to create shortcuts directory", Toast.LENGTH_LONG).show();
+                return;
+            }
+            File desktopFile = new File(shortcutsDir, displayName + ".desktop");
+            try (PrintWriter writer = new PrintWriter(new FileWriter(desktopFile))) {
+                writeDesktopEntry(
+                    writer,
+                    displayName,
+                    windowsPath,
+                    workingDir,
+                    displayName,
+                    container
+                );
+            }
+            // Extract the executable icon.
+            File iconDir64 = container.getIconsDir(64);
+            if (!iconDir64.exists()) iconDir64.mkdirs();
+            File iconDest = new File(iconDir64, displayName + ".png");
+            boolean iconExtracted = ExeIconExtractor.extractIcon(file, iconDest);
+            File iconsDir = new File(Environment.getExternalStorageDirectory(), "WinX/icons");
+            if (!iconsDir.exists()) iconsDir.mkdirs();
+            if (iconExtracted) {
+                File userIcon = new File(iconsDir, displayName + ".png");
+                if (!userIcon.exists()) {
+                    try {
+                        FileUtils.copy(iconDest, userIcon);
+                    } 
+                    catch (Exception ignored) { }
+                }
+            }
+            File coversDir = new File(Environment.getExternalStorageDirectory(), "WinX/covers");
+            if (!coversDir.exists()) coversDir.mkdirs();
+            File autoCover = new File(coversDir, displayName + ".png");
+            if (autoCover.exists()) autoCover.delete();
+            Toast.makeText(getContext(), "Shortcut created!", Toast.LENGTH_SHORT).show();
+        } catch (Exception e) {
+            e.printStackTrace();
+            Toast.makeText(getContext(), "Failed to create shortcut: " + e.getMessage(), Toast.LENGTH_LONG).show();
+        }
+    }
+
+    private void copyToClipboard(File file, boolean isCut) {
+        this.clipboardFile = file;
+        this.isCutOperation = isCut;
+        if (fabPaste != null) fabPaste.setVisibility(View.VISIBLE);
+        Toast.makeText(getContext(), (isCut ? "Cut: " : "Copied: ") + file.getName(), Toast.LENGTH_SHORT).show();
+    }
+
+    private void startPasteOperation() {
+        if (clipboardFile == null || !clipboardFile.exists()) {
+            Toast.makeText(getContext(), "Nothing to paste", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        final File source = clipboardFile;
+        File dest = new File(currentDir, source.getName());
+
+        if (dest.exists()) {
+            AlertDialog.Builder builder = new AlertDialog.Builder(getContext());
+            builder.setTitle(R.string.file_conflict);
+            builder.setMessage("The destination \"" + dest.getName() + "\" already exists.");
+            builder.setPositiveButton(R.string.replace, (dialog, which) -> {
+                deleteRecursive(dest);
+                executePaste(source, dest);
+            });
+            builder.setNeutralButton(R.string.rename, (dialog, which) -> {
+                File newDest = getUniqueDestination(currentDir, source.getName());
+                executePaste(source, newDest);
+            });
+            builder.setNegativeButton(R.string.cancel, null);
+            builder.show();
+        } else {
+            executePaste(source, dest);
+        }
+    }
+
+    private File getUniqueDestination(File dir, String name) {
+        File dest = new File(dir, name);
+        if (!dest.exists()) return dest;
+        
+        String baseName = name;
+        String extension = "";
+        int dotIndex = name.lastIndexOf('.');
+        if (dotIndex > 0) {
+            baseName = name.substring(0, dotIndex);
+            extension = name.substring(dotIndex);
+        }
+        
+        int counter = 1;
+        while (dest.exists()) {
+            dest = new File(dir, baseName + " (" + counter + ")" + extension);
+            counter++;
+        }
+        return dest;
+    }
+
+    private void executePaste(File source, File dest) {
+        if (isCutOperation) {
+            if (source.renameTo(dest)) {
+                Toast.makeText(getContext(), "Moved instantly", Toast.LENGTH_SHORT).show();
+                finishPaste(true);
+                return;
+            }
+        }
+
+        showProgressDialog(isCutOperation ? "Moving..." : "Copying...");
+        isOperationCancelled = false;
+
+        new Thread(() -> {
+            try {
+                long totalBytes = getFolderSize(source);
+                AtomicLong copiedBytes = new AtomicLong(0);
+
+                copyRecursiveWithProgress(source, dest, totalBytes, copiedBytes);
+
+                if (isCutOperation && !isOperationCancelled) {
+                    long srcSize = getFolderSize(source);
+                    long dstSize = getFolderSize(dest);
+                    
+                    if (srcSize > 0 && srcSize == dstSize && source.canRead()) {
+                        deleteRecursive(source);
+                    } else {
+                        throw new IOException("Safety Stop: Sizes mismatch (" + srcSize + " vs " + dstSize + ") or source unreadable.");
+                    }
+                }
+
+                new Handler(Looper.getMainLooper()).post(() -> {
+                    dismissProgressDialog();
+                    if (!isOperationCancelled) {
+                        Toast.makeText(getContext(), "Success!", Toast.LENGTH_SHORT).show();
+                        finishPaste(isCutOperation);
+                    } else {
+                        Toast.makeText(getContext(), "Cancelled", Toast.LENGTH_SHORT).show();
+                        deleteRecursive(dest);
+                        loadDirectory(currentDir);
+                    }
+                });
+
+            } catch (Exception e) {
+                final String errorMsg = e.getMessage();
+                new Handler(Looper.getMainLooper()).post(() -> {
+                    dismissProgressDialog();
+                    Toast.makeText(getContext(), "Error: " + errorMsg + ". Source preserved.", Toast.LENGTH_LONG).show();
+                    deleteRecursive(dest);
+                    loadDirectory(currentDir);
+                });
+            }
+        }).start();
+    }
+
+    private void finishPaste(boolean clearClipboard) {
+        if (clearClipboard) {
+            clipboardFile = null;
+            if (fabPaste != null) fabPaste.setVisibility(View.GONE);
+        }
+        loadDirectory(currentDir);
+    }
+
+    private void showProgressDialog(String title) {
+        AlertDialog.Builder builder = new AlertDialog.Builder(getContext());
+        builder.setTitle(title);
+        builder.setCancelable(false);
+
+        LinearLayout layout = new LinearLayout(getContext());
+        layout.setOrientation(LinearLayout.VERTICAL);
+        layout.setPadding(50, 40, 50, 20);
+
+        progressPercent = new TextView(getContext());
+        progressPercent.setText("0%");
+        progressPercent.setTextAlignment(View.TEXT_ALIGNMENT_CENTER);
+        progressPercent.setTextSize(18);
+        layout.addView(progressPercent);
+
+        progressBar = new ProgressBar(getContext(), null, android.R.attr.progressBarStyleHorizontal);
+        progressBar.setIndeterminate(false);
+        progressBar.setMax(100);
+        
+        layout.addView(progressBar);
+
+        progressText = new TextView(getContext());
+        progressText.setText("Calculating...");
+        progressText.setPadding(0, 20, 0, 0);
+        layout.addView(progressText);
+
+        builder.setView(layout);
+        builder.setNegativeButton(R.string.cancel, (d, w) -> isOperationCancelled = true);
+
+        progressDialog = builder.create();
+        progressDialog.show();
+    }
+
+    private void dismissProgressDialog() {
+        if (progressDialog != null && progressDialog.isShowing()) {
+            progressDialog.dismiss();
+        }
+    }
+
+    private void updateProgress(long current, long total) {
+        int percent = (total > 0) ? (int) ((current * 100) / total) : 0;
+        final String status = formatSize(current) + " / " + formatSize(total);
+        
+        new Handler(Looper.getMainLooper()).post(() -> {
+            if (progressBar != null) progressBar.setProgress(percent);
+            if (progressPercent != null) progressPercent.setText(percent + "%");
+            if (progressText != null) progressText.setText(status);
+        });
+    }
+
+    private long getFolderSize(File file) {
+        long size = 0;
+        if (file.isDirectory()) {
+            File[] files = file.listFiles();
+            if (files != null) {
+                for (File child : files) size += getFolderSize(child);
+            }
+        } else {
+            size = file.length();
+        }
+        return size;
+    }
+
+    private void copyRecursiveWithProgress(File src, File dst, long totalBytes, AtomicLong copiedBytes) throws IOException {
+        if (isOperationCancelled) return;
+
+        if (src.isDirectory()) {
+            if (!dst.exists() && !dst.mkdirs()) {
+                throw new IOException("Failed to create dir: " + dst.getName());
+            }
+            String[] children = src.list();
+            if (children != null) {
+                for (String child : children) {
+                    copyRecursiveWithProgress(new File(src, child), new File(dst, child), totalBytes, copiedBytes);
+                }
+            }
+        } else {
+            copyFileSafe(src, dst, totalBytes, copiedBytes);
+        }
+    }
+
+    private void copyFileSafe(File source, File dest, long totalBytes, AtomicLong totalCopied) throws IOException {
+        FileInputStream in = null;
+        FileOutputStream out = null;
+        try {
+            in = new FileInputStream(source);
+            out = new FileOutputStream(dest);
+            
+            byte[] buffer = new byte[8192];
+            int len;
+            long ONE_MB = 1024 * 1024;
+
+            while ((len = in.read(buffer)) > 0) {
+                if (isOperationCancelled) break;
+                out.write(buffer, 0, len);
+                
+                long oldTotal = totalCopied.get();
+                long newTotal = totalCopied.addAndGet(len);
+                
+                if ((newTotal / ONE_MB) > (oldTotal / ONE_MB)) {
+                    updateProgress(newTotal, totalBytes);
+                }
+            }
+            out.flush();
+            out.getFD().sync();
+
+        } finally {
+            if (in != null) in.close();
+            if (out != null) out.close();
+        }
+    }
+
+    private void deleteRecursive(File fileOrDirectory) {
+        if (fileOrDirectory.isDirectory()) {
+            File[] children = fileOrDirectory.listFiles();
+            if (children != null) {
+                for (File child : children) deleteRecursive(child);
+            }
+        }
+        fileOrDirectory.delete();
+    }
+
+    private void renameFile(File file) {
+        AlertDialog.Builder builder = new AlertDialog.Builder(getContext());
+        builder.setTitle(R.string.rename);
+        final EditText input = new EditText(getContext());
+        input.setText(file.getName());
+        builder.setView(input);
+        
+        builder.setPositiveButton(R.string.ok, (dialog, which) -> {
+            String newName = input.getText().toString();
+            File newFile = new File(file.getParent(), newName);
+            if (file.renameTo(newFile)) {
+                loadDirectory(currentDir);
+            } else {
+                Toast.makeText(getContext(), "Rename failed", Toast.LENGTH_SHORT).show();
+            }
+        });
+        builder.setNegativeButton(R.string.cancel, null);
+        builder.show();
+    }
+
+    private boolean isExecutable(File f) {
+        String name = f.getName().toLowerCase();
+        return name.endsWith(".exe") || name.endsWith(".msi") || name.endsWith(".bat");
+    }
+
+    private void showFileOptions(File file, View anchor) {
+        PopupMenu popup = new PopupMenu(getContext(), anchor);
+        
+        if (isExecutable(file)) {
+            popup.getMenu().add(R.string.run_open).setOnMenuItemClickListener(item -> {
+                performContainerAction(file, container -> runFileDirectly(file, container));
+                return true;
+            });
+            
+            popup.getMenu().add(R.string.create_shortcut).setOnMenuItemClickListener(item -> {
+                performContainerAction(file, container -> createShortcutDirectly(file, container));
+                return true;
+            });
+        }
+        popup.getMenu().add(R.string.copy).setOnMenuItemClickListener(item -> { copyToClipboard(file, false); return true; });
+        popup.getMenu().add(R.string.cut).setOnMenuItemClickListener(item -> { copyToClipboard(file, true); return true; });
+        popup.getMenu().add(R.string.rename).setOnMenuItemClickListener(item -> { renameFile(file); return true; });
+        popup.getMenu().add(R.string.delete).setOnMenuItemClickListener(item -> {
+             new AlertDialog.Builder(getContext())
+                .setTitle(R.string.delete)
+                .setMessage("Are you sure you want to delete " + file.getName() + "?")
+                .setPositiveButton(R.string.yes, (d, w) -> { deleteRecursive(file); loadDirectory(currentDir); })
+                .setNegativeButton(R.string.no, null)
+                .show();
+             return true;
+        }); 
+        popup.show();
+    }
+
+    private String getSmartDisplayName(File file) {
+        String filename = cleanGameName(file.getName());
+        String lowerName = filename.toLowerCase();
+        List<String> genericNames = Arrays.asList(
+            "game", "launcher", "setup", "installer", "start", "run", 
+            "speed", "update", "patch", "loader", "client", "app", "main", "boot", "play",
+            "application", "shipping", "x64", "x86", "win64", "win32", "binaries"
+        );
+        boolean isModOrGeneric = false;
+        if (lowerName.contains("mod") || lowerName.contains("fix") || lowerName.contains("crack") || lowerName.contains("patch")) isModOrGeneric = true;
+        if (!isModOrGeneric && filename.length() < 4) isModOrGeneric = true;
+        if (!isModOrGeneric) {
+            for (String gen : genericNames) {
+                if (lowerName.equals(gen) || lowerName.startsWith(gen + " ")) { isModOrGeneric = true; break; }
+            }
+        }
+        if (isModOrGeneric) {
+            File parent = file.getParentFile();
+            if (parent != null) {
+                String parentName = cleanGameName(parent.getName());
+                List<String> genericFolders = Arrays.asList("bin", "bin32", "bin64", "system", "release", "retail", "win64");
+                if (genericFolders.contains(parentName.toLowerCase())) {
+                    File grandParent = parent.getParentFile();
+                    if (grandParent != null) return cleanGameName(grandParent.getName());
+                }
+                return parentName;
+            }
+        }
+        return filename;
+    }
+
+    private String cleanGameName(String filename) {
+        String name = filename;
+        int pos = name.lastIndexOf(".");
+        if (pos > 0) name = name.substring(0, pos);
+        name = name.replace("_", " ").replace(".", " ").replace("-", " ");
+        name = name.replaceAll("(?i)\\b(v\\d+|repack|setup|installer|portable|goty|edition)\\b", "");
+        name = name.replaceAll("[^a-zA-Z0-9 ]", "");
+        name = name.replaceAll("\\s+", " ").trim();
+        return name;
+    }
+
+    private class FileAdapter extends RecyclerView.Adapter<FileAdapter.ViewHolder> {
+        private final List<File> files;
+        public FileAdapter(List<File> files) { this.files = files; }
+
+        @Override
+        public ViewHolder onCreateViewHolder(ViewGroup parent, int viewType) {
+            View v = LayoutInflater.from(parent.getContext()).inflate(R.layout.file_list_item, parent, false);
+            return new ViewHolder(v);
+        }
+
+        @Override
+        public void onBindViewHolder(ViewHolder holder, int position) {
+            File file = files.get(position);
+            holder.tvName.setText(file.getName());
+            if (file.isDirectory()) {
+                holder.ivIcon.setImageResource(R.drawable.icon_open); 
+                holder.tvDetails.setText(R.string.folder);
+                holder.btMenu.setVisibility(View.VISIBLE);
+                holder.btMenu.setImageResource(android.R.drawable.ic_menu_more);
+                holder.btMenu.setOnClickListener(v -> showFileOptions(file, holder.btMenu));
+                holder.itemView.setOnClickListener(v -> loadDirectory(file));
+            } else {
+                holder.tvDetails.setText(formatSize(file.length()));
+                boolean isExe = isExecutable(file);
+                if (isExe) holder.ivIcon.setImageResource(R.drawable.icon_wine); 
+                else holder.ivIcon.setImageResource(android.R.drawable.ic_menu_agenda);
+                holder.btMenu.setVisibility(View.VISIBLE);
+                holder.btMenu.setImageResource(android.R.drawable.ic_menu_more);
+                holder.btMenu.setOnClickListener(v -> showFileOptions(file, holder.btMenu));
+                holder.itemView.setOnClickListener(v -> Toast.makeText(getContext(), file.getName(), Toast.LENGTH_SHORT).show());
+            }
+        }
+
+        @Override
+        public int getItemCount() { return files.size(); }
+
+        class ViewHolder extends RecyclerView.ViewHolder {
+            TextView tvName, tvDetails;
+            ImageView ivIcon, btMenu;
+            ViewHolder(View v) {
+                super(v);
+                tvName = v.findViewById(R.id.TVFileName);
+                tvDetails = v.findViewById(R.id.TVFileDetails);
+                ivIcon = v.findViewById(R.id.IVIcon);
+                btMenu = v.findViewById(R.id.BTFileMenu);
+            }
+        }
+    }
+
+    private String formatSize(long size) {
+        if (size < 1024) return size + " B";
+        int z = (63 - Long.numberOfLeadingZeros(size)) / 10;
+        return String.format("%.1f %sB", (double)size / (1L << (z*10)), " KMGTPE".charAt(z));
+    }
+}

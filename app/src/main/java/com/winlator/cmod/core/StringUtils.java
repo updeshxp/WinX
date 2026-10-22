@@ -100,7 +100,7 @@ public class StringUtils {
         String escapedPath = path.replace("\\", "\\\\\\\\");
 
         // Replace spaces with escaped spaces
-        escapedPath = escapedPath.replace(" ", "\\\\");
+        escapedPath = escapedPath.replace(" ", "\\ ");
 
         return escapedPath;
     }
