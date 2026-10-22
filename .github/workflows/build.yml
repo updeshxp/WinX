@@ -98,7 +98,7 @@ jobs:
         tag_name: winx-bionic-${{ steps.build_info.outputs.short_sha }}
         name: WinX Bionic - ${{ steps.build_info.outputs.short_sha }}
         body: |
-          ## WinX Bionic Custom Release
+          ## WinX Bionic Release
 
           **Branch:** `${{ steps.build_info.outputs.branch }}`
           **Commit:** `${{ steps.build_info.outputs.full_sha }}`
